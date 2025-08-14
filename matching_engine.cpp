@@ -76,21 +76,42 @@ class OrderBook {
 
     };
 
-    void match(int n) {
+    void addOrder(const Order& o) {
+        if (o.side == Side::BUY) {
+            // find price level, push to end of linked list
+            bids[o.price].push_back(o);
+        } else {
+            asks[o.price].push_back(o);
+        }
+    }
+
+    void match() {
         std::map<Order, int, BidComparator> bidMatches;
         std::map<Order, int, AskComparator> askMatches;
-        for (int i = 0; i < n; i++) {
-            bool matched = false;
+        while (true) {
             if (!bids.empty() && !asks.empty() && bids.begin()->first >= asks.begin()->first) {
                 Order b = bids.begin()->second.front();
                 Order a = asks.begin()->second.front();
 
-                bids.begin()->second.pop_front(); // pop from front of the price level
-                asks.begin()->second.pop_front();
+                int qMatched = 0;
+                if (b.quantity > a.quantity) {
+                    // remove the first order completely of the asks
+                    asks.begin()->second.pop_front();
+                    qMatched = a.quantity;
+                    bids.begin()->second.front().quantity -= qMatched;
+                } else if (a.quantity > b.quantity) {
+                    bids.begin()->second.pop_front();
+                    qMatched = b.quantity;
+                    asks.begin()->second.front().quantity -= qMatched;
+                } else {
+                    // pop order from both completely
+                    asks.begin()->second.pop_front();
+                    bids.begin()->second.pop_front();
+                    qMatched = a.quantity;
+                }
 
-                bidMatches[b]++;
-                askMatches[a]++;
-                matched = true;
+                bidMatches[b] += qMatched;
+                askMatches[a] += qMatched;
 
                 // if price level empty, remove the price level
                 if (bids.begin()->second.empty()) {
@@ -99,14 +120,12 @@ class OrderBook {
                 if (asks.begin()->second.empty()) {
                     asks.erase(asks.begin());
                 }
-            }
-
-            if (!matched) {
+            } else {
                 break;
             }
         }
         for (auto& [o, q] : bidMatches) {
-            std::cout << q << " sold at " << o.price << " at " << FormatTime(o.timestamp);
+            std::cout << q << " sold at " << o.price << " at " << FormatTime(o.timestamp) << '\n';
         }
     }
 };
