@@ -71,7 +71,125 @@ class OrderBook {
     std::map<int, std::list<Order>, std::greater<>> bids; // lists -> price levels
     std::map<int, std::list<Order>> asks;
 
+    void match(Order order) {
+        std::map<Order, int, BidComparator> bidMatches;
+        std::map<Order, int, AskComparator> askMatches;
+        int qMatched = 0;
+
+        int p = order.price;
+        int qMatched = 0;
+        // first check for FOK
+        bool filled = false;
+        if (order.side == Side::BUY && order.t == TimeInForce::FOK) {
+            for (const auto& [price, orders] : asks) {
+                if (p < price && !filled) {
+                    return;
+                }
+                for (const auto& o : orders) {
+                    if (p >= o.price || order.o == OrderType::MARKET) {
+                        qMatched += o.quantity;
+                    }
+                    if (qMatched >= order.quantity) {
+                        filled = true;
+                        break;
+                    }
+                }
+                if (filled) {
+                    break;
+                }
+            }
+        } else if (order.side == Side::SELL && order.t == TimeInForce::FOK) {
+            for (const auto& [price, orders] : bids) {
+                if (p > price && !filled) {
+                    return;
+                }
+                for (const auto& o : orders) {
+                    if (p <= o.price || order.o == OrderType::MARKET) {
+                        qMatched += o.quantity;
+                    }
+                    if (qMatched >= order.quantity) {
+                        filled = true;
+                        break;
+                    }
+                }
+                if (filled) {
+                    break;
+                }
+            }
+        }
+
+        // 
+        while (true) {
+            if (order.side == Side::BUY) {
+                if ((order.o == OrderType::MARKET && !asks.empty()) || (!asks.empty() && p >= asks.begin()->first)) {
+                    Order a = asks.begin()->second.front();
+                    if (order.quantity > a.quantity) {
+
+                        order.quantity -= a.quantity;
+                        // remove the first order completely of the asks
+                        asks.begin()->second.pop_front();
+
+                    } else if (a.quantity > order.quantity) {                        
+                        asks.begin()->second.front().quantity -= qMatched;
+                        order.quantity = 0;
+                        break;
+                    } else {
+                        asks.begin()->second.pop_front();
+                        order.quantity = 0;
+                        break;
+                    }
+
+                    if (order.quantity == 0) {
+                        break;
+                    }
+
+                    if (asks.begin()->second.empty()) {
+                        asks.erase(asks.begin());
+                    }
+                // GTC adds unmatched back into OB only if limit order
+                } else if (order.o == OrderType::LIMIT && order.t == TimeInForce::GTC) {
+                    bids[order.price].push_back(order);
+                }
+            
+            } else {
+                if ((order.o == OrderType::MARKET && !asks.empty()) || !asks.empty() && p >= asks.begin()->first) {
+                    Order a = asks.begin()->second.front();
+                    if (order.quantity > a.quantity) {
+
+                        order.quantity -= a.quantity;
+                        // remove the first order completely of the asks
+                        asks.begin()->second.pop_front();
+
+                    } else if (a.quantity > order.quantity) {                        
+                        asks.begin()->second.front().quantity -= qMatched;
+                        order.quantity = 0;
+                        break;
+                    } else {
+                        asks.begin()->second.pop_front();
+                        order.quantity = 0;
+                        break;
+                    }
+
+                    if (order.quantity == 0) {
+                        break;
+                    }
+
+                    if (asks.begin()->second.empty()) {
+                        asks.erase(asks.begin());
+                    }
+                // GTC adds unmatched back into OB
+                } else if (order.o == OrderType::LIMIT && order.t == TimeInForce::GTC) {
+                    bids[order.price].push_back(order);
+                }
+            }
+        }
+        for (auto& [o, q] : bidMatches) {
+            std::cout << q << " sold at " << o.price << " at " << FormatTime(o.timestamp) << '\n';
+        }
+    }
+
     public:
+
     OrderBook() {
 
     };
@@ -83,53 +201,48 @@ class OrderBook {
         } else {
             asks[o.price].push_back(o);
         }
+        match(o);
+        // printOB();
     }
 
-    void match() {
-        std::map<Order, int, BidComparator> bidMatches;
-        std::map<Order, int, AskComparator> askMatches;
-        while (true) {
-            if (!bids.empty() && !asks.empty() && bids.begin()->first >= asks.begin()->first) {
-                Order b = bids.begin()->second.front();
-                Order a = asks.begin()->second.front();
+    // void printOB() {
+    //     std::cout << "          BIDS            |           ASKS           ";
+    //     int size = std::min(bids.size(), asks.size());
+    //     for (int i = 0; i < size; i++) {
+    //         auto& it1 = bids.begin();
+    //         auto& it2 = bids.begin();
 
-                int qMatched = 0;
-                if (b.quantity > a.quantity) {
-                    // remove the first order completely of the asks
-                    asks.begin()->second.pop_front();
-                    qMatched = a.quantity;
-                    bids.begin()->second.front().quantity -= qMatched;
-                } else if (a.quantity > b.quantity) {
-                    bids.begin()->second.pop_front();
-                    qMatched = b.quantity;
-                    asks.begin()->second.front().quantity -= qMatched;
-                } else {
-                    // pop order from both completely
-                    asks.begin()->second.pop_front();
-                    bids.begin()->second.pop_front();
-                    qMatched = a.quantity;
-                }
-
-                bidMatches[b] += qMatched;
-                askMatches[a] += qMatched;
-
-                // if price level empty, remove the price level
-                if (bids.begin()->second.empty()) {
-                    bids.erase(bids.begin());
-                }
-                if (asks.begin()->second.empty()) {
-                    asks.erase(asks.begin());
-                }
-            } else {
-                break;
-            }
-        }
-        for (auto& [o, q] : bidMatches) {
-            std::cout << q << " sold at " << o.price << " at " << FormatTime(o.timestamp) << '\n';
-        }
-    }
+    //         int bidP = bids.begin()->first;
+    //         int asksP = asks.begin()->first;
+    //         std::cout << "         " << bidP << "           |               " << asksP << '\n';
+    //         it1 = it1.next
+    //     }
+    // }
 };
 
 int main() {
+    OrderBook ob;
+
+    std::cout << "Enter Order: {Price}, {Id}, {Quantity}, {BUY/SELL}, {GTC/IOC/FOK}, {LIMIT/MARKET} \n";
+
+    while (true) {
+        int price;
+        uint64_t id, quantity;
+        std::string side, timeIn, type;
+        std::cin >> price >> id >> quantity >> side >> timeIn >> type;
+
+        Side s = side == "BUY" ? Side::BUY : Side::SELL;
+        TimeInForce t;
+        if (timeIn == "GTC") {
+            t = TimeInForce::GTC;
+        } else if (timeIn == "IOC") {
+            t = TimeInForce::IOC;
+        } else if (timeIn == "FOK") {
+            t = TimeInForce::FOK;
+        }
+        OrderType ty = type == "LIMIT" ? OrderType::LIMIT : OrderType::MARKET;
+
+        ob.addOrder({price, id, quantity, s, t, ty, Clock::now()});
+    }
     return 0;
 }
